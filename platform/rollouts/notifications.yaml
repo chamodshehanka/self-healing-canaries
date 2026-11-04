@@ -1,0 +1,58 @@
+# Argo Rollouts notifications -> AI SRE webhook. This is the "closes the loop" wiring.
+# ${AI_SRE_URL} and ${CLUSTER} are filled in by scripts/up.sh per cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argo-rollouts-notification-configmap
+  namespace: argo-rollouts
+data:
+  service.webhook.ai-sre: |
+    url: ${AI_SRE_URL}
+    headers:
+    - name: Content-Type
+      value: application/json
+
+  trigger.on-rollout-aborted: |
+    - send: [ai-sre-rollout-aborted]
+  trigger.on-rollout-completed: |
+    - send: [ai-sre-rollout-completed]
+
+  template.ai-sre-rollout-aborted: |
+    webhook:
+      ai-sre:
+        method: POST
+        path: /hooks/rollout
+        body: |
+          {
+            "event": "aborted",
+            "cluster": "${CLUSTER}",
+            "env": "{{index .rollout.metadata.labels "env"}}",
+            "namespace": "{{.rollout.metadata.namespace}}",
+            "rollout": "{{.rollout.metadata.name}}",
+            "image": "{{(index .rollout.spec.template.spec.containers 0).image}}",
+            "canaryHash": "{{.rollout.status.currentPodHash}}",
+            "stableHash": "{{.rollout.status.stableRS}}",
+            "gitSha": "{{index .rollout.metadata.annotations "scn.dev/git-sha"}}",
+            "sourcePR": "{{index .rollout.metadata.annotations "scn.dev/source-pr"}}",
+            "sourceBranch": "{{index .rollout.metadata.annotations "scn.dev/source-branch"}}"
+          }
+
+  template.ai-sre-rollout-completed: |
+    webhook:
+      ai-sre:
+        method: POST
+        path: /hooks/rollout
+        body: |
+          {
+            "event": "completed",
+            "cluster": "${CLUSTER}",
+            "env": "{{index .rollout.metadata.labels "env"}}",
+            "namespace": "{{.rollout.metadata.namespace}}",
+            "rollout": "{{.rollout.metadata.name}}",
+            "image": "{{(index .rollout.spec.template.spec.containers 0).image}}",
+            "canaryHash": "{{.rollout.status.currentPodHash}}",
+            "stableHash": "{{.rollout.status.stableRS}}",
+            "gitSha": "{{index .rollout.metadata.annotations "scn.dev/git-sha"}}",
+            "sourcePR": "{{index .rollout.metadata.annotations "scn.dev/source-pr"}}",
+            "sourceBranch": "{{index .rollout.metadata.annotations "scn.dev/source-branch"}}"
+          }

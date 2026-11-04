@@ -1,0 +1,21 @@
+:root { --bad: #f85149; --ok: #3fb950; --acc: #58a6ff; }
+.slidev-layout h1 { font-weight: 700; letter-spacing: -0.02em; }
+.kicker { text-transform: uppercase; letter-spacing: .12em; font-size: .8rem; opacity: .7; margin-bottom: 1rem; }
+.speakers { margin-top: 3rem; font-size: 1.1rem; }
+.muted { opacity: .65; }
+.bad { color: var(--bad); font-weight: 700; }
+.big-quote { font-size: 1.9rem; line-height: 1.4; margin-top: 2rem; font-style: italic; }
+.big-quote.small { font-size: 1.2rem; margin-top: .5rem; }
+.callout { font-size: 1.6rem; font-weight: 700; border-left: 6px solid var(--acc); padding: .4rem 1rem; }
+.math { font-size: 2.2rem; text-align: center; margin-top: 2rem; }
+.math .w { font-weight: 800; font-size: 3rem; padding: 0 .3rem; }
+.card { border: 1px solid #8884; border-radius: 12px; padding: 1rem 1.25rem; }
+.steps ol li { margin: .5rem 0; }
+.steps.big ol li { font-size: 1.25rem; margin: .8rem 0; }
+table { font-size: .85rem; }
+.arch { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 1.2rem; margin-top: 1rem; font-size: .85rem; }
+.arch .col { border: 1px solid #8885; border-radius: 12px; padding: .8rem; display: flex; flex-direction: column; gap: .6rem; }
+.arch h4 { margin: 0 0 .2rem; font-size: 1rem; }
+.arch .box { border: 1px solid #8886; border-radius: 8px; padding: .5rem .7rem; background: #8881; }
+.arch .box.hl { border-color: var(--acc); background: #58a6ff1a; }
+.arch .arrow { font-size: .8rem; opacity: .8; padding-left: .5rem; border-left: 3px solid var(--acc); }

@@ -1,0 +1,72 @@
+# The payment Rollout. Every Argo Rollouts setting doing real work is commented.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: payment
+  annotations:
+    # Argo Rollouts' own notifications close the loop — nobody runs a script.
+    # aborted   -> AI SRE investigates + ledger records "failed"
+    # completed -> ledger records "passed"
+    notifications.argoproj.io/subscribe.on-rollout-aborted.ai-sre: ""
+    notifications.argoproj.io/subscribe.on-rollout-completed.ai-sre: ""
+spec:
+  replicas: 4
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+      - name: payment
+        image: payment           # set per environment by the overlay (tag = git SHA)
+        ports:
+        - containerPort: 8080
+        env:
+        - name: INVENTORY_URL
+          value: http://inventory:8080
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: otel-collector.observability:4317
+        # No BUILD_ID, no GIT_COMMIT. The app doesn't know which build it is.
+        readinessProbe:
+          httpGet: {path: /healthz, port: 8080}
+          periodSeconds: 2
+        livenessProbe:
+          httpGet: {path: /healthz, port: 8080}
+        resources:
+          requests: {cpu: 50m, memory: 32Mi}
+          limits: {cpu: 500m, memory: 128Mi}
+  strategy:
+    canary:
+      canaryService: payment-canary
+      stableService: payment-stable
+      # Gateway API traffic split: setWeight is a real 1%, not "1 pod out of N".
+      trafficRouting:
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: payment
+            namespace: payments
+      steps:
+      - setWeight: 1               # 1% of real users — the dilution case
+      - analysis:
+          templates:
+          - templateName: canary-health
+          args:
+          # Argo hands us the ReplicaSet identities. These hashes ARE the build
+          # identity: one hash = one pod template = one image.
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+      - setWeight: 25
+      - pause: {duration: 20s}
+      - setWeight: 50
+      - pause: {duration: 20s}

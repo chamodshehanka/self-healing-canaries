@@ -1,0 +1,96 @@
+# Build once, promote the artifact.
+#
+# On every push to a PR that touches apps/:
+#   1. test + build ONE payment image, tagged with the commit SHA (sha-<7>)
+#   2. write that tag into BOTH overlays on the PR branch:
+#        deploy/overlays/staging  -> Argo CD deploys it while the PR is under test
+#        deploy/overlays/prod     -> only takes effect when a human merges the PR
+#   3. record where it came from (commit, PR, branch) in each overlay's release.yaml;
+#      Argo Rollouts notifications forward this to the AI SRE.
+#
+# The merge to main is the promotion. Prod runs the exact image staging judged.
+name: pr-image
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ["apps/**"]
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: pr-image-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-promote:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.head_ref }}
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: apps/go.mod
+        cache-dependency-path: apps/go.sum
+
+    - name: Test
+      working-directory: apps
+      run: go vet ./... && go test ./...
+
+    - name: Metadata
+      id: meta
+      run: |
+        SHA="${{ github.event.pull_request.head.sha }}"
+        OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+        echo "short=${SHA::7}" >> "$GITHUB_OUTPUT"
+        echo "tag=sha-${SHA::7}" >> "$GITHUB_OUTPUT"
+        echo "image=ghcr.io/${OWNER}/scn-payment" >> "$GITHUB_OUTPUT"
+
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push payment
+      uses: docker/build-push-action@v6
+      with:
+        context: apps
+        build-args: APP=payment
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Promote tag into overlays (on the PR branch)
+      env:
+        TAG: ${{ steps.meta.outputs.tag }}
+        GIT_SHA: ${{ steps.meta.outputs.short }}
+        PR: ${{ github.event.pull_request.number }}
+        BRANCH: ${{ github.head_ref }}
+      run: |
+        for env in staging prod; do
+          yq -i '(.images[] | select(.name == "payment")).newTag = strenv(TAG)' deploy/overlays/$env/kustomization.yaml
+          yq -i '.metadata.annotations."scn.dev/git-sha" = strenv(GIT_SHA) |
+                 .metadata.annotations."scn.dev/source-pr" = strenv(PR) |
+                 .metadata.annotations."scn.dev/source-branch" = strenv(BRANCH) |
+                 .metadata.annotations[] style="double"' deploy/overlays/$env/release.yaml
+        done
+        git config user.name  "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add deploy/overlays
+        if git diff --cached --quiet; then echo "overlays already at $TAG"; exit 0; fi
+        git commit -m "deploy: payment ${TAG} -> staging, prod (on merge)"
+        git push origin "HEAD:${BRANCH}"
+
+    - name: Summary
+      run: |
+        echo "### payment \`${{ steps.meta.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- staging: deploy with \`scripts/demo/deploy-pr-to-staging.sh ${{ github.head_ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- prod: promoted when this PR is merged" >> "$GITHUB_STEP_SUMMARY"

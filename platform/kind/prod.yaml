@@ -1,0 +1,9 @@
+# Prod cluster. Managed by Argo CD running in staging.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: prod
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - {containerPort: 30090, hostPort: 9091}    # Prometheus (prod)
+  - {containerPort: 30686, hostPort: 16687}   # Jaeger (prod)

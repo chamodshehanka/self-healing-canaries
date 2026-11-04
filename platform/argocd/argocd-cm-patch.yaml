@@ -1,0 +1,4 @@
+# Demo tuning: poll git every 15s instead of 3 minutes, so a merge shows up on stage
+# immediately even without a GitHub webhook. (Production: use the webhook instead.)
+data:
+  timeout.reconciliation: 15s

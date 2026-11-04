@@ -1,0 +1,23 @@
+# Envoy Gateway is installed by scripts/up.sh (Helm). This is the cluster-level glue.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+# A stable in-cluster name for the payments/checkout Gateway's Envoy pods, so the
+# load generator doesn't need to know Envoy Gateway's generated service name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout-gateway
+  namespace: envoy-gateway-system
+spec:
+  selector:
+    gateway.envoyproxy.io/owning-gateway-name: checkout
+    gateway.envoyproxy.io/owning-gateway-namespace: payments
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080

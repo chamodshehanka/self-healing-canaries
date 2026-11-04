@@ -1,0 +1,20 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    paths: ["apps/**", "deploy/**"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: apps/go.mod
+        cache-dependency-path: apps/go.sum
+    - working-directory: apps
+      run: go vet ./... && go test ./...
+    - name: Render overlays
+      run: |
+        kubectl kustomize deploy/overlays/staging > /dev/null
+        kubectl kustomize deploy/overlays/prod > /dev/null

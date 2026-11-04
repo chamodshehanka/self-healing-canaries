@@ -1,0 +1,8 @@
+.idea/
+.DS_Store
+ai-sre/.env
+ai-sre/.venv/
+__pycache__/
+slides/node_modules/
+slides/dist/
+slides/.slidev/

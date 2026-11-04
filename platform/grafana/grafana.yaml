@@ -1,0 +1,71 @@
+# Grafana (in the staging cluster) — one pane over BOTH environments.
+# Humans use it in the browser; the AI SRE uses it through the Grafana MCP server.
+# ${PROD_NODE_IP} is the prod kind node's IP on the docker "kind" network.
+# Demo-grade auth (anonymous viewer + admin/admin). Do not copy to production.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: observability
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - {name: Prometheus-staging, uid: prom-staging, type: prometheus, access: proxy, url: "http://prometheus.observability:9090", isDefault: true}
+    - {name: Prometheus-prod,    uid: prom-prod,    type: prometheus, access: proxy, url: "http://${PROD_NODE_IP}:30090"}
+    - {name: Loki-staging,       uid: loki-staging, type: loki,       access: proxy, url: "http://loki.observability:3100"}
+    - {name: Loki-prod,          uid: loki-prod,    type: loki,       access: proxy, url: "http://${PROD_NODE_IP}:30100"}
+    - {name: Jaeger-staging,     uid: jaeger-staging, type: jaeger,   access: proxy, url: "http://jaeger.observability:16686"}
+    - {name: Jaeger-prod,        uid: jaeger-prod,    type: jaeger,   access: proxy, url: "http://${PROD_NODE_IP}:30686"}
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+    - {name: demo, folder: Self-Healing Canaries, type: file, options: {path: /var/lib/grafana/dashboards}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:12.1.0
+        env:
+        - {name: GF_SECURITY_ADMIN_USER, value: admin}
+        - {name: GF_SECURITY_ADMIN_PASSWORD, value: admin}
+        - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
+        - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+        - {name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH, value: /var/lib/grafana/dashboards/canaries.json}
+        - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+        ports:
+        - containerPort: 3000
+        readinessProbe:
+          httpGet: {path: /api/health, port: 3000}
+        volumeMounts:
+        - {name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml}
+        - {name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml}
+        - {name: dashboards, mountPath: /var/lib/grafana/dashboards}
+      volumes:
+      - name: provisioning
+        configMap: {name: grafana-datasources}
+      - name: dashboards
+        configMap: {name: grafana-dashboards}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  type: NodePort
+  selector: {app: grafana}
+  ports:
+  - {port: 3000, targetPort: 3000, nodePort: 30030}

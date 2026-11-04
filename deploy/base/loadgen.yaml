@@ -1,0 +1,23 @@
+# Simulated users. RPS and PROFILE come from the overlay's loadgen.env, which is
+# the single most important difference between staging and prod in this demo.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: loadgen}
+  template:
+    metadata:
+      labels: {app: loadgen}
+    spec:
+      containers:
+      - name: loadgen
+        image: loadgen
+        envFrom:
+        - configMapRef:
+            name: loadgen
+        resources:
+          requests: {cpu: 25m, memory: 32Mi}
+          limits: {cpu: 300m, memory: 128Mi}

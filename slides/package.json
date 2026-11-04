@@ -1,0 +1,17 @@
+{
+  "name": "self-healing-canaries-slides",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "slidev --open",
+    "build": "slidev build",
+    "export": "slidev export --output self-healing-canaries.pdf",
+    "export:notes": "slidev export-notes --output speaker-notes.pdf",
+    "export:pptx": "slidev export --format pptx --output self-healing-canaries.pptx"
+  },
+  "dependencies": {
+    "@slidev/cli": "^53.0.0",
+    "@slidev/theme-default": "latest",
+    "playwright-chromium": "^1.48.0"
+  }
+}

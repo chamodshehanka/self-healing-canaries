@@ -1,0 +1,87 @@
+# Judge each canary on its OWN traffic.
+#
+# Three metrics, one vote:
+#   canary-error-rate     the gate. Scoped to the canary's pod-template-hash. Can abort.
+#   service-error-rate    dryRun. What a service-wide SLO alert sees (diluted).
+#   canary-vs-stable-p95  dryRun. What a latency check sees (gray failures are fast).
+#
+# Metric names come from otelhttp (OTel HTTP semconv). The rollouts_pod_template_hash
+# label is added by the Prometheus scrape config, not by the app.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-health
+spec:
+  args:
+  - name: canary-hash
+  - name: stable-hash
+  - name: service
+    value: payment
+  - name: prometheus
+    value: http://prometheus.observability:9090
+
+  # Dry-run metrics are measured and shown, but never fail the rollout.
+  dryRun:
+  - metricName: service-error-rate
+  - metricName: canary-vs-stable-p95
+  # Keep every dry-run measurement so the audience (and the AI SRE) can see them.
+  measurementRetention:
+  - metricName: service-error-rate
+    limit: 20
+  - metricName: canary-vs-stable-p95
+    limit: 20
+
+  metrics:
+  # ── THE GATE ──────────────────────────────────────────────────────────────
+  - name: canary-error-rate
+    interval: 15s
+    count: 8                      # up to 2 minutes of evidence
+    failureLimit: 1               # tolerate one bad blip; the 2nd failure aborts
+    inconclusiveLimit: 3          # not enough traffic -> pause for a human, never "pass"
+    # No traffic is not a pass: the query returns nothing below 10 requests,
+    # so neither condition matches and the measurement is Inconclusive.
+    successCondition: len(result) > 0 && result[0] < 0.01
+    failureCondition: len(result) > 0 && result[0] >= 0.01
+    provider:
+      prometheus:
+        address: "{{args.prometheus}}"
+        query: |
+          (
+            sum(rate(http_server_duration_milliseconds_count{app="{{args.service}}", rollouts_pod_template_hash="{{args.canary-hash}}", http_status_code=~"5.."}[1m]))
+            or vector(0)
+          )
+          /
+          sum(rate(http_server_duration_milliseconds_count{app="{{args.service}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[1m]))
+          and
+          sum(increase(http_server_duration_milliseconds_count{app="{{args.service}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[1m])) > 10
+
+  # ── DRY RUN: what the service-wide SLO sees ───────────────────────────────
+  - name: service-error-rate
+    interval: 15s
+    count: 8
+    successCondition: len(result) > 0 && result[0] < 0.01
+    failureCondition: len(result) > 0 && result[0] >= 0.01
+    provider:
+      prometheus:
+        address: "{{args.prometheus}}"
+        query: |
+          (
+            sum(rate(http_server_duration_milliseconds_count{app="{{args.service}}", http_status_code=~"5.."}[1m]))
+            or vector(0)
+          )
+          /
+          sum(rate(http_server_duration_milliseconds_count{app="{{args.service}}"}[1m]))
+
+  # ── DRY RUN: what a latency check sees ────────────────────────────────────
+  - name: canary-vs-stable-p95
+    interval: 15s
+    count: 8
+    successCondition: len(result) > 0 && result[0] < 1.5
+    failureCondition: len(result) > 0 && result[0] >= 1.5
+    provider:
+      prometheus:
+        address: "{{args.prometheus}}"
+        query: |
+          histogram_quantile(0.95, sum by (le) (rate(http_server_duration_milliseconds_bucket{app="{{args.service}}", rollouts_pod_template_hash="{{args.canary-hash}}"}[2m])))
+          /
+          histogram_quantile(0.95, sum by (le) (rate(http_server_duration_milliseconds_bucket{app="{{args.service}}", rollouts_pod_template_hash="{{args.stable-hash}}"}[2m])))

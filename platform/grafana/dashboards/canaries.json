@@ -1,0 +1,541 @@
+{
+  "uid": "self-healing-canaries",
+  "title": "Self-Healing Canaries",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "tags": [
+    "argocon"
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "STAGING",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error rate per ReplicaSet (what the gate sees)",
+      "description": "Scoped to each pod-template-hash. 1% line = the gate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-staging"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "legendFormat": "hash {{rollouts_pod_template_hash}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-staging"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Service-wide error rate (what an SLO alert sees)",
+      "description": "Diluted: a 1% canary failing 30% of requests moves this by 0.3%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-staging"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum(rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "legendFormat": "payment (all pods)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-staging"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "p95 latency per ReplicaSet (what a latency check sees)",
+      "description": "Gray failures fail fast. The broken canary is often FASTER.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-staging"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_bucket{app=\"payment\"}[2m])))",
+          "legendFormat": "hash {{rollouts_pod_template_hash}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-staging"
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Requests/s per ReplicaSet (traffic split)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-staging"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "legendFormat": "hash {{rollouts_pod_template_hash}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-staging"
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "payment errors (OTel logs \u2192 Loki, hash added by the collector)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki-staging"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 9,
+        "w": 16,
+        "h": 7
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-staging"
+          },
+          "expr": "{service_name=\"payment\"} | severity_text=\"ERROR\""
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "PROD",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Error rate per ReplicaSet (what the gate sees)",
+      "description": "Scoped to each pod-template-hash. 1% line = the gate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-prod"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "legendFormat": "hash {{rollouts_pod_template_hash}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-prod"
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Service-wide error rate (what an SLO alert sees)",
+      "description": "Diluted: a 1% canary failing 30% of requests moves this by 0.3%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-prod"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 17,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "thresholdsStyle": {
+              "mode": "line+area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum(rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "legendFormat": "payment (all pods)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-prod"
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "p95 latency per ReplicaSet (what a latency check sees)",
+      "description": "Gray failures fail fast. The broken canary is often FASTER.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-prod"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 17,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_bucket{app=\"payment\"}[2m])))",
+          "legendFormat": "hash {{rollouts_pod_template_hash}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-prod"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Requests/s per ReplicaSet (traffic split)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom-prod"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "legendFormat": "hash {{rollouts_pod_template_hash}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prom-prod"
+          }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "logs",
+      "title": "payment errors (OTel logs \u2192 Loki, hash added by the collector)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki-prod"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 25,
+        "w": 16,
+        "h": 7
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki-prod"
+          },
+          "expr": "{service_name=\"payment\"} | severity_text=\"ERROR\""
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

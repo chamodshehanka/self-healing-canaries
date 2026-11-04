@@ -1,0 +1,14 @@
+# Registers the prod kind cluster with Argo CD. Filled in by scripts/up.sh.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-prod
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+type: Opaque
+stringData:
+  name: prod
+  server: https://${PROD_NODE_IP}:6443
+  config: |
+    {"tlsClientConfig": {"caData": "${PROD_CA}", "certData": "${PROD_CERT}", "keyData": "${PROD_KEY}"}}

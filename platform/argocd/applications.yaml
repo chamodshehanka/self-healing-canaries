@@ -1,0 +1,51 @@
+# Two Applications, one Argo CD (running in the staging cluster).
+#
+#   payment-staging  -> staging cluster, follows a PR branch while a PR is under test
+#                       (scripts/demo/deploy-pr-to-staging.sh flips targetRevision),
+#                       otherwise main.
+#   payment-prod     -> prod cluster, follows main only. Merging a PR IS the promotion.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payment-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: ${REPO_URL}
+    targetRevision: main
+    path: deploy/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payments
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, RespectIgnoreDifferences=true]
+  # Argo Rollouts owns the HTTPRoute weights during a canary. Without this, Argo CD
+  # self-heal and the Rollouts controller fight over the traffic split.
+  ignoreDifferences:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    jqPathExpressions: [".spec.rules[].backendRefs[].weight"]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payment-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: ${REPO_URL}
+    targetRevision: main
+    path: deploy/overlays/prod
+  destination:
+    name: prod
+    namespace: payments
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, RespectIgnoreDifferences=true]
+  ignoreDifferences:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    jqPathExpressions: [".spec.rules[].backendRefs[].weight"]
