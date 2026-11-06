@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Healing Canaries</title>
+<style>
+:root {
+  --bg: #0b0f17; --panel: #121826; --panel2: #0f1521; --line: #253048; --fg: #e8edf6; --mut: #8b97ad;
+  --ok: #3ddc84; --bad: #ff5d5d; --warn: #ffb547; --acc: #5ab0ff; --pur: #c79bff;
+  --stable: #3ddc84; --canary: #ffb547; --svc: #5ab0ff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+code, .mono { font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wrap { padding: 14px 16px 16px; display: grid; gap: 12px; }
+
+header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+header .sub { color: var(--mut); font-size: 13px; }
+header .right { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--mut); font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.dot.off { background: var(--bad); }
+
+/* story */
+.story { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: stretch; }
+.steps { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; }
+.part { grid-column: span 5; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--mut); padding-left: 2px; }
+.step { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; min-height: 64px; position: relative; }
+.step .n { font-size: 11px; color: var(--mut); }
+.step .t { font-weight: 650; font-size: 13px; line-height: 1.2; margin-top: 2px; }
+.step .s { font-size: 11px; color: var(--mut); margin-top: 3px; line-height: 1.2; }
+.step.done { border-color: #1f5e3c; background: #0f2219; }
+.step.done .n::after { content: " ✓"; color: var(--ok); }
+.step.cur { border-color: var(--acc); box-shadow: 0 0 0 2px #5ab0ff44, 0 0 18px #5ab0ff33; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 2px #5ab0ff88, 0 0 26px #5ab0ff55; } }
+.next { min-width: 270px; display: flex; flex-direction: column; justify-content: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.next .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--mut); }
+button { font: inherit; cursor: pointer; border-radius: 9px; border: 1px solid var(--line); background: #1a2335; color: var(--fg); padding: 7px 11px; }
+button:hover { border-color: var(--acc); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--acc); color: #04121f; border-color: var(--acc); font-weight: 700; font-size: 15px; padding: 11px 14px; }
+.waiting { color: var(--warn); font-weight: 600; }
+
+/* grid */
+.grid { display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 12px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-width: 0; }
+.card h2 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.card h3 { margin: 12px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--mut); font-weight: 600; }
+.badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #222c40; color: var(--mut); }
+.badge.Healthy, .badge.Successful, .badge.passed, .badge.success, .badge.done, .badge.MERGED { background: #12351f; color: var(--ok); }
+.badge.Degraded, .badge.Failed, .badge.failed, .badge.failure, .badge.error, .badge.CLOSED { background: #3a1416; color: var(--bad); }
+.badge.Progressing, .badge.Running, .badge.running, .badge.in_progress, .badge.queued, .badge.OPEN { background: #3a2a0c; color: var(--warn); }
+.badge.Paused, .badge.Inconclusive { background: #2b2440; color: var(--pur); }
+.envmeta { color: var(--mut); font-size: 12px; margin-top: 4px; }
+.envmeta b { color: var(--fg); font-weight: 600; }
+
+.split { display: flex; height: 30px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line); margin-top: 8px; }
+.split div { display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; transition: flex-basis .6s ease; }
+.split .st { background: #134127; color: #b9f5d2; }
+.split .cn { background: #5a3f0b; color: #ffe2ad; }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--mut); margin-top: 6px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+.metrics { display: grid; gap: 4px; }
+.metric { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; font-size: 12.5px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
+.metric .k small { color: var(--mut); margin-left: 4px; }
+.metric .v { font-family: ui-monospace, Menlo, monospace; color: var(--fg); }
+
+svg.chart { width: 100%; height: 130px; display: block; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+svg.chart.small { height: 70px; }
+svg text { fill: var(--mut); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
+
+/* agent */
+.agent { max-height: 560px; display: flex; flex-direction: column; }
+.agent .feed { overflow: auto; flex: 1; margin-top: 8px; padding-right: 4px; }
+.ev { display: grid; grid-template-columns: 54px 22px 1fr; gap: 6px; padding: 4px 0; border-bottom: 1px dashed #1e2740; font-size: 12.5px; align-items: start; }
+.ev .ts { color: var(--mut); font: 11px ui-monospace, Menlo, monospace; padding-top: 2px; }
+.ev .ic { text-align: center; }
+.ev .tool { font-weight: 700; }
+.ev .args { color: var(--mut); font: 11px/1.35 ui-monospace, Menlo, monospace; word-break: break-all; display: block; max-height: 2.8em; overflow: hidden; }
+.ev.allow .tool { color: var(--ok); }
+.ev.deny .tool { color: var(--bad); }
+.ev.write { background: #12233a; border-radius: 6px; }
+.report { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; font-size: 13px; }
+.report b { color: var(--acc); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; display: block; margin-top: 6px; }
+.report a { color: var(--acc); }
+
+.bottom { display: grid; grid-template-columns: 1.1fr 1fr 1.2fr; gap: 12px; align-items: start; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+td, th { text-align: left; padding: 5px 6px; border-bottom: 1px solid #1e2740; white-space: nowrap; }
+th { color: var(--mut); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+td.wrap { white-space: normal; }
+a { color: var(--acc); text-decoration: none; }
+.env-staging { color: var(--acc); font-weight: 700; }
+.env-prod { color: var(--warn); font-weight: 700; }
+.console { background: #070a10; border: 1px solid var(--line); border-radius: 8px; padding: 8px; height: 150px; overflow: auto; white-space: pre-wrap; font: 11.5px/1.35 ui-monospace, Menlo, monospace; color: #c9d4e8; }
+.tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tools button { font-size: 12px; padding: 5px 8px; }
+.mut { color: var(--mut); }
+@media (max-width: 1100px) { .grid, .bottom, .story { grid-template-columns: 1fr; } .steps { grid-template-columns: repeat(5, 1fr); } .part { grid-column: span 5; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Self-Healing Canaries</h1>
+    <div class="sub">Argo Rollouts canary gate scoped to each ReplicaSet · OpenTelemetry · AI SRE: AURA + Kimi K3.1 Pro on Nebius Token Factory</div>
+    <div class="right"><span class="dot" id="live"></span><span id="clock">connecting…</span></div>
+  </header>
+
+  <section class="story">
+    <div class="steps" id="steps"></div>
+    <div class="next" id="next"></div>
+  </section>
+
+  <section class="grid">
+    <div class="card" id="env-staging"></div>
+    <div class="card" id="env-prod"></div>
+    <div class="card agent" id="agent"></div>
+  </section>
+
+  <section class="bottom">
+    <div class="card"><h2>Release ledger <span class="mut" style="font-size:12px;font-weight:400">which image passed or failed where</span></h2><div id="ledger"></div></div>
+    <div class="card"><h2>Pull requests</h2><div id="prs"></div></div>
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="tools" id="tools"></div>
+      <div class="console" id="console">Output of actions run from this page appears here.</div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pct = (v, d = 1) => (v == null || isNaN(v) ? "—" : (v * 100).toFixed(d) + "%");
+const hhmm = (t) => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+let SNAP = null, RUN = null;
+
+const TOOLS = [
+  ["deploy-feature", "Deploy feature PR → staging"], ["deploy-latest", "Deploy newest PR → staging"], ["merge", "Merge newest PR"],
+  ["trigger-staging", "Fallback: start AI SRE (staging)"], ["trigger-prod", "Fallback: start AI SRE (prod)"],
+  ["retry-staging", "Retry staging rollout"], ["retry-prod", "Retry prod rollout"],
+  ["fallback-pr1", "Fallback fix (PR 1)"], ["fallback-pr2", "Fallback fix (PR 2)"],
+  ["status", "Status"], ["reset", "Reset demo + reopen PR"],
+];
+const CONFIRM = { merge: "Merge the newest open PR? (this is the human-in-the-loop step)", reset: "Reset the demo? Closes all open PRs, restores main's apps/ and deploy/, clears the ledger, then reopens the feature PR (~5 min).", "fallback-pr1": "Push the prepared fix to the feature PR?", "fallback-pr2": "Open the prepared fallback PR?" };
+
+async function run(action) {
+  if (CONFIRM[action] && !confirm(CONFIRM[action])) return;
+  const r = await fetch("/api/run/" + action, {method: "POST"});
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || r.statusText); }
+  pollRun();
+}
+
+/* ── charts ─────────────────────────────────────────────────────────── */
+function chart(series, {roles, threshold, fmt, minMax, small}) {
+  const W = 520, H = small ? 70 : 130, L = 40, R = 8, T = 8, B = 16;
+  const pts = series.flatMap((s) => s.points);
+  if (!pts.length) return `<svg class="chart ${small ? "small" : ""}" viewBox="0 0 ${W} ${H}"><text x="${W/2}" y="${H/2}" text-anchor="middle">no traffic yet</text></svg>`;
+  const t0 = Math.min(...pts.map((p) => p[0])), t1 = Math.max(...pts.map((p) => p[0]));
+  let ymax = Math.max(minMax, ...pts.map((p) => p[1])) * 1.15;
+  const x = (t) => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
+  const y = (v) => T + (1 - v / ymax) * (H - T - B);
+  let g = "";
+  for (const f of [0, .5, 1]) { const v = ymax * f; g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#1e2740"/><text x="${L-4}" y="${y(v)+3}" text-anchor="end">${fmt(v)}</text>`; }
+  if (threshold != null && threshold < ymax) g += `<line x1="${L}" x2="${W-R}" y1="${y(threshold)}" y2="${y(threshold)}" stroke="#ff5d5d" stroke-dasharray="5 4"/><text x="${W-R}" y="${y(threshold)-3}" text-anchor="end" style="fill:#ff8a8a">gate ${fmt(threshold)}</text>`;
+  g += `<text x="${L}" y="${H-3}">${hhmm(t0)}</text><text x="${W-R}" y="${H-3}" text-anchor="end">${hhmm(t1)}</text>`;
+  for (const s of series) {
+    const role = roles(s.label);
+    const d = s.points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+    g += `<path d="${d}" fill="none" stroke="${role.color}" stroke-width="${role.w || 2}" ${role.dash ? `stroke-dasharray="${role.dash}"` : ""} opacity="${role.op || 1}"/>`;
+  }
+  return `<svg class="chart ${small ? "small" : ""}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>`;
+}
+
+/* ── env cards ──────────────────────────────────────────────────────── */
+function envCard(env) {
+  const ro = SNAP.rollouts[env] || {}, ch = SNAP.charts[env] || {}, app = (SNAP.argo || {})["payment-" + env] || {};
+  if (ro.error) return `<h2>${env}</h2><p class="mut">cluster unreachable</p>`;
+  const cw = ro.canary ? ro.canaryWeight : 0, sw = 100 - cw;
+  const roles = (h) => h === ro.stable?.hash ? {color: "var(--stable)"} : (ro.canary && h === ro.canary.hash) ? {color: "var(--canary)", w: 3} : {color: "#6b7a96", op: .6};
+  const errSeries = [...(ch.errRS || []), ...(ch.errAll || []).map((s) => ({...s, label: "__svc"}))];
+  const errRoles = (h) => h === "__svc" ? {color: "var(--svc)", dash: "6 4", w: 2} : roles(h);
+  const phase = ro.aborted ? "Degraded" : ro.phase;
+  const a = ro.analysis;
+  const metrics = a ? a.metrics.map((m) => {
+    let v = m.value; try { const arr = JSON.parse(m.value); v = Array.isArray(arr) ? arr[0] : arr; } catch {}
+    const shown = m.name.includes("p95") ? (v == null ? "—" : Number(v).toFixed(2) + "×") : pct(Number(v), 2);
+    const label = m.name === "canary-error-rate" ? "Canary error rate <small>the gate · this ReplicaSet only</small>"
+      : m.name === "service-error-rate" ? "Service-wide error rate <small>dry run · what an SLO alert sees</small>"
+      : "Canary vs stable p95 <small>dry run · latency check</small>";
+    return `<div class="metric"><span class="k">${label}</span><span class="v">${v == null || v === "" ? "—" : shown}</span><span class="badge ${m.phase}">${m.phase}</span></div>`;
+  }).join("") : `<div class="mut">no analysis yet</div>`;
+
+  return `
+    <h2><span class="env-${env}">${env.toUpperCase()}</span> <span class="badge ${phase}">${esc(phase)}</span>
+      <span class="mut" style="font-size:12px;font-weight:400;margin-left:auto">step ${ro.step ?? "—"}/${ro.steps ?? "—"} · Argo CD: ${esc(app.revision || "—")} · ${esc(app.sync || "")}</span></h2>
+    <div class="envmeta">traffic: <b>${esc(ro.traffic?.rps || "?")} req/s</b> · <span class="mono">${esc((ro.traffic?.profile || "").replaceAll(",", " · "))}</span></div>
+    ${ro.message ? `<div class="envmeta" style="color:var(--bad)">${esc(ro.message).slice(0, 160)}</div>` : ""}
+    <div class="split">
+      <div class="st" style="flex-basis:${sw}%">${sw >= 12 ? `stable ${sw}% · ${esc(ro.stable?.image || "")}` : ""}</div>
+      <div class="cn" style="flex-basis:${cw}%">${cw >= 12 ? `canary ${cw}% · ${esc(ro.canary?.image || "")}` : (cw ? cw + "%" : "")}</div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--stable)"></i>stable <code>${esc(ro.stable?.image || "—")}</code></span>
+      ${ro.canary ? `<span><i style="background:var(--canary)"></i>canary <code>${esc(ro.canary.image || ro.desiredImage)}</code> · ${cw}% of traffic</span>` : `<span class="mut">no canary running</span>`}
+      ${ro.sourcePR ? `<span>from PR <b>#${esc(ro.sourcePR)}</b></span>` : ""}
+    </div>
+    <h3>Canary analysis</h3><div class="metrics">${metrics}</div>
+    <h3>Error rate · <span style="color:var(--canary)">canary</span> / <span style="color:var(--stable)">stable</span> per ReplicaSet vs <span style="color:var(--svc)">service-wide</span></h3>
+    ${chart(errSeries, {roles: errRoles, threshold: 0.01, fmt: (v) => (v * 100).toFixed(v < 0.1 ? 1 : 0) + "%", minMax: 0.02})}
+    <h3>Requests/s per ReplicaSet</h3>
+    ${chart(ch.rps || [], {roles, fmt: (v) => v.toFixed(0), minMax: 10, small: true})}`;
+}
+
+/* ── agent ──────────────────────────────────────────────────────────── */
+const ICON = (name) => /prometheus|datasource/.test(name) ? "📈" : /loki/.test(name) ? "📜" : /release_history|compare_env/.test(name) ? "📒"
+  : /push_files|create_or_update|create_branch|create_pull|add_issue_comment/.test(name) ? "✍️" : "🔎";
+function agentCard() {
+  const inv = (SNAP.investigations || [])[0];
+  if (!inv) return `<h2>AI SRE <span class="mut" style="font-size:12px;font-weight:400">AURA · Kimi K3.1 Pro · Nebius Token Factory</span></h2>
+    <p class="mut" style="margin-top:14px">Waiting for an aborted rollout. Argo Rollouts' <code>on-rollout-aborted</code> notification starts an investigation here. Nobody runs anything.</p>`;
+  const ev = inv.event;
+  const rows = inv.steps.filter((s) => s.kind !== "result").map((s) => {
+    if (s.kind === "tool") {
+      const write = /push_files|create_or_update|create_branch|create_pull|add_issue_comment/.test(s.name);
+      return `<div class="ev ${write ? "write" : ""}"><span class="ts">${hhmm(s.t)}</span><span class="ic">${ICON(s.name)}</span><span><span class="tool">${esc(s.name)}</span><span class="args">${esc(s.args)}</span></span></div>`;
+    }
+    const m = /^policy: (\S+) → (ALLOW|DENY.*)$/.exec(s.text || "");
+    if (m) return `<div class="ev ${m[2] === "ALLOW" ? "allow" : "deny"}"><span class="ts">${hhmm(s.t)}</span><span class="ic">🛡️</span><span><span class="tool">policy ${esc(m[2])}</span> <span class="mut">${esc(m[1])}</span></span></div>`;
+    if ((s.text || "").startsWith("policy: {")) return "";
+    return `<div class="ev"><span class="ts">${hhmm(s.t)}</span><span class="ic">💭</span><span class="mut">${esc(s.text).slice(0, 220)}</span></div>`;
+  }).join("");
+  const rep = inv.report;
+  const report = rep ? `<div class="report"><b>Root cause</b>${esc(rep.root_cause)}
+      ${rep.environment_difference ? `<b>Environment difference</b>${esc(rep.environment_difference)}` : ""}
+      <b>Fix</b>${esc(rep.fix_summary)}
+      <b>Action</b>${esc(rep.action)} ${rep.pr_url ? `· <a href="${esc(rep.pr_url)}" target="_blank">${esc(rep.pr_url.replace("https://github.com/", ""))}</a>` : ""} · confidence ${esc(rep.confidence)}</div>`
+    : inv.error ? `<div class="report" style="color:var(--bad)">${esc(inv.error)}</div>` : "";
+  return `<h2>AI SRE <span class="badge ${inv.status}">${esc(inv.status)}</span>
+      <span class="mut" style="font-size:12px;font-weight:400;margin-left:auto">AURA · Kimi K3.1 Pro · Token Factory</span></h2>
+    <div class="envmeta">investigating <span class="env-${ev.env}">${esc(ev.env)}</span> canary <code>${esc(ev.canaryHash)}</code> · <code>${esc((ev.image || "").split(":").pop())}</code>${ev.sourcePR ? ` · PR #${esc(ev.sourcePR)}` : ""} · started ${hhmm(inv.ts)}</div>
+    <div class="feed" id="feed">${rows || `<p class="mut">thinking…</p>`}${report}</div>`;
+}
+
+/* ── render ─────────────────────────────────────────────────────────── */
+function render() {
+  const st = SNAP.story;
+  $("steps").innerHTML = `<div class="part">Part 1 · a bug staging can catch</div><div class="part">Part 2 · a bug only prod can see</div>` +
+    st.steps.map((s, i) => `<div class="step ${s.done ? "done" : ""} ${st.current === s.id ? "cur" : ""}"><div class="n">${i + 1}</div><div class="t">${esc(s.title)}</div><div class="s">${esc(s.sub)}</div></div>`).join("");
+  const n = st.next;
+  const busy = RUN && RUN.running;
+  $("next").innerHTML = `<div class="lbl">Next</div>` + (
+    n?.action ? `<button class="primary" ${busy ? "disabled" : ""} onclick="run('${n.action}')">▶ ${esc(n.label)}</button>`
+    : n?.wait ? `<div class="waiting">⏳ ${esc(n.wait)}</div>`
+    : n?.done ? `<div style="color:var(--ok);font-weight:700">✓ Demo complete. Prod is green.</div><button onclick="run('reset')" ${busy ? "disabled" : ""}>Reset for another run</button>`
+    : `<div class="waiting">⏳ automatic — watch the panels</div>`);
+
+  $("env-staging").innerHTML = envCard("staging");
+  $("env-prod").innerHTML = envCard("prod");
+
+  const feed = $("feed"); const stick = !feed || feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 30;
+  $("agent").innerHTML = agentCard();
+  const f2 = $("feed"); if (f2 && stick) f2.scrollTop = f2.scrollHeight;
+
+  $("ledger").innerHTML = SNAP.ledger.length ? `<table><tr><th>time</th><th>env</th><th>image</th><th>hash</th><th>PR</th><th>verdict</th></tr>` +
+    SNAP.ledger.map((r) => `<tr><td>${hhmm(r.ts)}</td><td class="env-${r.env}">${esc(r.env)}</td><td><code>${esc(r.image.split(":").pop())}</code></td><td><code>${esc(r.pod_hash)}</code></td><td>${r.source_pr ? "#" + esc(r.source_pr) : ""}</td><td><span class="badge ${r.verdict}">${esc(r.verdict)}</span></td></tr>`).join("") + `</table>`
+    : `<p class="mut">No rollouts recorded yet.</p>`;
+
+  $("prs").innerHTML = SNAP.prs.length ? `<table><tr><th>#</th><th>title</th><th>state</th><th>CI</th></tr>` +
+    SNAP.prs.slice(0, 6).map((p) => `<tr><td><a href="${esc(p.url)}" target="_blank">#${p.number}</a></td><td class="wrap">${esc(p.title).slice(0, 70)}<div class="mut mono">${esc(p.headRefName)}</div></td><td><span class="badge ${p.state}">${esc(p.state)}</span></td><td>${p.ci ? `<span class="badge ${p.ci}">${esc(p.ci)}</span>` : ""}</td></tr>`).join("") + `</table>`
+    : `<p class="mut">No PRs.</p>`;
+
+  $("tools").innerHTML = TOOLS.map(([id, label]) => `<button ${busy ? "disabled" : ""} onclick="run('${id}')">${esc(label)}</button>`).join("");
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/snapshot", {cache: "no-store"});
+    const s = await r.json();
+    if (s.story) { SNAP = s; render(); }
+    $("live").classList.toggle("off", !s.ts || Date.now() / 1000 - s.ts > 15);
+    $("clock").textContent = s.ts ? "live · updated " + hhmm(s.ts) : "waiting for first snapshot…";
+  } catch { $("live").classList.add("off"); $("clock").textContent = "disconnected (is the tunnel up?)"; }
+}
+async function pollRun() {
+  try {
+    RUN = await (await fetch("/api/run", {cache: "no-store"})).json();
+    if (RUN.id) {
+      const c = $("console"); const stick = c.scrollTop + c.clientHeight >= c.scrollHeight - 20;
+      c.textContent = RUN.out.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "") + (RUN.running ? "\n… running" : `\n[exit ${RUN.rc}]`);
+      if (stick) c.scrollTop = c.scrollHeight;
+    }
+  } catch {}
+}
+poll(); pollRun(); setInterval(poll, 2000); setInterval(pollRun, 1500);
+</script>
+</body>
+</html>
