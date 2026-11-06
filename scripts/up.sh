@@ -37,7 +37,7 @@ platform() {
 
   say "[$c] Argo Rollouts $ARGO_ROLLOUTS_VERSION (+ gatewayAPI plugin $GATEWAYAPI_PLUGIN_VERSION, notifications -> $AI_SRE_URL)"
   kubectl "${k[@]}" create namespace argo-rollouts --dry-run=client -o yaml | kubectl "${k[@]}" apply -f -
-  kubectl "${k[@]}" apply -n argo-rollouts \
+  kubectl "${k[@]}" apply -n argo-rollouts --server-side --force-conflicts \
     -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml" >/dev/null
   render "$ROOT/platform/rollouts/config.yaml" | kubectl "${k[@]}" apply -f -
   render "$ROOT/platform/rollouts/notifications.yaml" | kubectl "${k[@]}" apply -f -
