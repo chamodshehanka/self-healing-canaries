@@ -10,6 +10,8 @@ for pr in $(gh pr list -R "$GITHUB_REPO" --state open --json number --jq '.[].nu
   gh pr close -R "$GITHUB_REPO" "$pr" --delete-branch
 done
 git push -q origin --delete "$PR1_BRANCH" 2>/dev/null || true
+git switch -q main 2>/dev/null || true
+git branch -q -D "$PR1_BRANCH" 2>/dev/null || true   # prepare.sh recreates it
 
 git fetch -q origin --tags
 BR="reset/$(date +%s)"

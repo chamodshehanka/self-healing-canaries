@@ -26,6 +26,9 @@ concurrency:
 
 jobs:
   build-and-promote:
+    # Our own overlay-bump commit (below) re-fires `synchronize`; skip it instead of
+    # building twice and racing the overlay push.
+    if: github.event.sender.login != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
