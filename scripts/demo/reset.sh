@@ -32,5 +32,15 @@ kubectl "${KSTG[@]}" -n argocd patch application payment-staging --type merge \
 for app in payment-staging payment-prod; do
   kubectl "${KSTG[@]}" -n argocd annotate application "$app" argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 done
+# Going back to baseline is not something to canary: wait for each rollout to pick up
+# the baseline spec, then promote it straight to 100%.
+say "promoting the baseline to 100% in both clusters"
+for c in staging prod; do
+  for _ in $(seq 1 24); do
+    img=$(kubectl --context "kind-$c" -n payments get rollout payment -o jsonpath='{.spec.template.spec.containers[0].image}')
+    [[ "$img" == *":$BASE_TAG" ]] && break; sleep 5
+  done
+  kubectl argo rollouts --context "kind-$c" -n payments promote payment --full >/dev/null 2>&1 || true
+done
 kubectl "${KSTG[@]}" -n ai-sre rollout restart deploy/ai-sre >/dev/null
 ok "reset. Re-run scripts/demo/prepare.sh to re-open PR #1."
