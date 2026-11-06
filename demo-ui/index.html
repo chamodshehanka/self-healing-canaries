@@ -194,7 +194,7 @@ function envCard(env) {
       : m.name === "service-error-rate" ? "Service-wide error rate <small>dry run · what an SLO alert sees</small>"
       : "Canary vs stable p95 <small>dry run · latency check</small>";
     return `<div class="metric"><span class="k">${label}</span><span class="v">${v == null || v === "" ? "—" : shown}</span><span class="badge ${m.phase}">${m.phase}</span></div>`;
-  }).join("") : `<div class="mut">no analysis yet</div>`;
+  }).join("") : `<div class="mut">no canary analysis for this revision yet</div>`;
 
   return `
     <h2><span class="env-${env}">${env.toUpperCase()}</span> <span class="badge ${phase}">${esc(phase)}</span>

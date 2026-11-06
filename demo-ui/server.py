@@ -97,6 +97,9 @@ def prom_range(env, q, minutes=12, step=10):
 
 
 # ── Kubernetes ────────────────────────────────────────────────────────────────
+METRIC_ORDER = ["canary-error-rate", "service-error-rate", "canary-vs-stable-p95"]
+
+
 def rollout_view(env):
     r = kjson(env, "-n", "payments", "get", "rollout", "payment")
     if not r:
@@ -115,7 +118,9 @@ def rollout_view(env):
 
     ar = kjson(env, "-n", "payments", "get", "analysisrun", "--sort-by=.metadata.creationTimestamp")
     analysis = None
-    items = ar.get("items", [])
+    # Only the analysis of the revision being rolled out now; an older run would show a stale verdict.
+    items = [a for a in ar.get("items", [])
+             if a["metadata"].get("labels", {}).get("rollouts-pod-template-hash") == canary_h]
     if items:
         a = items[-1]
         dry = {d.get("metricName") for d in a["spec"].get("dryRun") or []}
@@ -124,7 +129,8 @@ def rollout_view(env):
             "metrics": [{
                 "name": m["name"], "phase": m.get("phase"), "dryRun": m["name"] in dry,
                 "value": ((m.get("measurements") or [{}])[-1]).get("value"),
-            } for m in a.get("status", {}).get("metricResults", [])],
+            } for m in sorted(a.get("status", {}).get("metricResults", []),
+                              key=lambda m: METRIC_ORDER.index(m["name"]) if m["name"] in METRIC_ORDER else 99)],
         }
     # The traffic this environment receives (kustomize-generated configmap loadgen-<hash>).
     cms = [c for c in kjson(env, "-n", "payments", "get", "configmaps").get("items", [])

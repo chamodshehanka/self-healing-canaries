@@ -43,4 +43,4 @@ for c in staging prod; do
   kubectl argo rollouts --context "kind-$c" -n payments promote payment --full >/dev/null 2>&1 || true
 done
 kubectl "${KSTG[@]}" -n ai-sre rollout restart deploy/ai-sre >/dev/null
-ok "reset. Re-run scripts/demo/prepare.sh to re-open PR #1."
+ok "reset. Re-run scripts/demo/prepare.sh to re-open the feature PR."
