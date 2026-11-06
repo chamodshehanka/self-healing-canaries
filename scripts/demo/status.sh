@@ -12,4 +12,5 @@ printf '\n%s── ledger ──%s\n' "$c_b" "$c_0"
 curl -fsS localhost:8088/api/state 2>/dev/null | python3 -c '
 import sys,json
 for r in json.load(sys.stdin)["releases"][:8]:
-    print(f"  {r[\"env\"]:8} {r[\"image\"].split(\"/\")[-1]:28} {r[\"pod_hash\"] or \"\":12} {r[\"verdict\"]}")' || warn "AI SRE not reachable on :8088"
+    env, img, h, v = r["env"], r["image"].split("/")[-1], r["pod_hash"] or "", r["verdict"]
+    print(f"  {env:8} {img:28} {h:12} {v}")' || warn "AI SRE not reachable on :8088"
