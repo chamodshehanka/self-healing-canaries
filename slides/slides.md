@@ -360,7 +360,7 @@ gets the exact image staging judged. And the traffic is different, as it always 
 <div class="box">Argo CD <span class="muted">— staging app follows the PR, prod app follows main</span></div>
 <div class="box">Rollout + AnalysisRun <span class="muted">(1% via Gateway API)</span></div>
 <div class="box">OTel Collector · Prometheus · Loki · Jaeger</div>
-<div class="box hl">AI SRE · Agents SDK<br/><span class="muted">Grafana MCP → Grafana (both envs)<br/>GitHub MCP → push fix / open PR</span></div>
+<div class="box hl">AI SRE · AURA on Nebius Token Factory<br/><span class="muted">Grafana MCP → Grafana (both envs)<br/>GitHub MCP → push fix / open PR</span></div>
 </div>
 <div class="col">
 <h4>kind: prod</h4>
@@ -373,7 +373,7 @@ gets the exact image staging judged. And the traffic is different, as it always 
 <!--
 [8:30] Everything on this slide is open source except the model.
 Argo CD, Argo Rollouts, Envoy Gateway, OTel Collector, Prometheus, Loki, Jaeger, Grafana,
-the Grafana MCP server, the GitHub MCP server, the OpenAI Agents SDK.
+the Grafana MCP server, the GitHub MCP server, AURA (mezmo/aura) running Kimi K3.1 Pro on Nebius Token Factory.
 -->
 
 ---

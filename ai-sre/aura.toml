@@ -1,0 +1,87 @@
+# AURA (github.com/mezmo/aura) running the AI SRE, on Nebius Token Factory.
+#
+# The ai-sre pod runs three containers:
+#   ai-sre        FastAPI: Rollouts webhook, release ledger (+ its MCP server), HITL policy, stage UI
+#   aura          this config: the agent loop, tools, guardrails. OpenAI-compatible API on :8090
+#   mcp-grafana   Grafana MCP, read-only
+#
+# scripts/up.sh renders this file into the aura-config ConfigMap, replacing the
+# playbook placeholder line with ai-sre/playbook.md. The env.* template values are resolved by AURA
+# at startup from the ai-sre-env Secret, so no key is ever written into the ConfigMap.
+
+# ── Guardrail 2: every GitHub write is parked until our policy webhook answers ──
+# The webhook (ai-sre /hitl/policy) allows a write only when it targets a non-main
+# branch and touches no protected path; in dry-run mode it denies them all.
+[hitl]
+require_approval = [
+  "push_files",
+  "create_or_update_file",
+  "create_branch",
+  "create_pull_request",
+  "add_issue_comment",
+]
+
+[hitl.route]
+mode = "webhook"
+url = "http://localhost:8080/hitl/policy"
+timeout_secs = 30
+
+[mcp]
+sanitize_schemas = true
+
+# Telemetry: Prometheus + Loki for both environments, through Grafana. Read-only.
+[mcp.servers.grafana]
+transport = "http_streamable"
+url = "http://localhost:8000/mcp"
+description = "Grafana: Prometheus and Loki datasources for staging and prod (read-only)"
+
+# Code and PRs. Remote GitHub MCP server, fine-grained PAT scoped to this one repo.
+[mcp.servers.github]
+transport = "http_streamable"
+url = "https://api.githubcopilot.com/mcp/"
+description = "GitHub: read commits, files and PRs; push fixes to PR branches; open PRs"
+
+[mcp.servers.github.headers]
+Authorization = "Bearer {{ env.GITHUB_TOKEN }}"
+X-MCP-Toolsets = "repos,pull_requests,issues"
+
+# Release ledger: which image passed or failed where. Served by the ai-sre container.
+[mcp.servers.ledger]
+transport = "http_streamable"
+url = "http://localhost:8080/ledger/mcp"
+description = "Release ledger: canary verdicts per image and environment"
+
+[agent]
+name = "ai-sre"
+model_owner = "nebius-token-factory"
+turn_depth = 40
+nudge_turns_remaining = 4
+nudge_last_turn = true
+
+# ── Guardrail 1: the only tools the model ever sees ─────────────────────────────
+# Reads from all three servers, plus five GitHub writes (each gated above).
+# Not listed, so never exposed: merge_pull_request, delete_*, update_pull_request*,
+# fork_repository, create_repository, workflow and admin tools.
+mcp_filter = [
+  # ledger
+  "get_release_history", "compare_environments",
+  # grafana (server already runs with --disable-write)
+  "list_datasources", "query_prometheus", "list_prometheus_*", "query_loki_*", "list_loki_*",
+  # github, read
+  "get_commit", "get_file_contents", "list_commits", "list_branches", "search_code",
+  "pull_request_read", "list_pull_requests", "issue_read",
+  # github, write (each one goes through [hitl])
+  "push_files", "create_or_update_file", "create_branch", "create_pull_request", "add_issue_comment",
+]
+
+system_prompt = '''
+__PLAYBOOK__
+'''
+
+[agent.llm]
+provider = "openai"
+base_url = "https://api.tokenfactory.nebius.com/v1"
+api_key = "{{ env.NEBIUS_API_KEY }}"
+model = "{{ env.AI_SRE_MODEL | default: 'moonshotai/Kimi-K3.1-Pro' }}"
+max_tokens = 16384
+context_window = 262144

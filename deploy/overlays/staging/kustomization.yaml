@@ -16,13 +16,13 @@ patches:
 
 images:
 - name: payment
-  newName: ghcr.io/chamodshehanka/scn-payment
+  newName: ghcr.io/shivaylamba/scn-payment
   newTag: v1.0.0
 - name: inventory
-  newName: ghcr.io/chamodshehanka/scn-inventory
+  newName: ghcr.io/shivaylamba/scn-inventory
   newTag: v1.0.0
 - name: loadgen
-  newName: ghcr.io/chamodshehanka/scn-loadgen
+  newName: ghcr.io/shivaylamba/scn-loadgen
   newTag: v1.0.0
 
 configMapGenerator:

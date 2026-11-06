@@ -6,3 +6,4 @@ __pycache__/
 slides/node_modules/
 slides/dist/
 slides/.slidev/
+ai-sre/.aura-rendered.toml

@@ -113,9 +113,9 @@ Service-wide error rate over the same window: <Y>% (why aggregate alerts missed 
 CI builds a new image → Argo CD syncs staging → the same canary gate judges it on its own traffic.
 A human reviews and merges; merge promotes the exact image to prod.
 
-— AI SRE (OpenAI Agents SDK · Grafana MCP · GitHub MCP). Telemetry was treated as untrusted input.
+— AI SRE (AURA on Nebius Token Factory · Grafana MCP · GitHub MCP). Telemetry was treated as untrusted input.
 ```
 
 ## Final output
-Return the `Report` object. `pr_url` is the PR you opened or the PR you pushed to.
+End with the Report as JSON, in the format the task asks for. `pr_url` is the PR you opened or the PR you pushed to.
 Keep `root_cause` speakable on stage: two sentences.

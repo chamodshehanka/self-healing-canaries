@@ -1,5 +1,8 @@
 # AI SRE in the staging (management) cluster.
-#   ai-sre       FastAPI webhook + OpenAI Agents SDK agent + SQLite release ledger
+#   ai-sre       FastAPI: Rollouts webhook, SQLite release ledger (+ its MCP server at /ledger/mcp),
+#                HITL policy webhook (/hitl/policy), stage UI
+#   aura         AURA (mezmo/aura) agent server on Nebius Token Factory, localhost:8090 only.
+#                Config: the aura-config ConfigMap (ai-sre/aura.toml + playbook.md)
 #   mcp-grafana  Grafana MCP server sidecar, read-only (--disable-write), localhost only
 # The prod cluster's Rollouts notifications reach this via NodePort 30808.
 apiVersion: v1
@@ -28,13 +31,29 @@ spec:
         envFrom:
         - secretRef: {name: ai-sre-env}
         env:
-        - {name: GRAFANA_MCP_URL, value: "http://localhost:8000/mcp"}
+        - {name: AURA_URL, value: "http://localhost:8090"}
         ports:
         - containerPort: 8080
         readinessProbe:
           httpGet: {path: /healthz, port: 8080}
         volumeMounts:
         - {name: data, mountPath: /data}
+      - name: aura
+        image: ${AURA_IMAGE}
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - secretRef: {name: ai-sre-env}       # NEBIUS_API_KEY, GITHUB_TOKEN, AI_SRE_MODEL
+        env:
+        - {name: CONFIG_PATH, value: /etc/aura/config.toml}
+        - {name: HOST, value: "127.0.0.1"}
+        - {name: PORT, value: "8090"}
+        - {name: AURA_CUSTOM_EVENTS, value: "true"}   # aura.tool_requested etc. for the stage UI
+        - {name: TOOL_RESULT_MODE, value: aura}
+        - {name: TOOL_RESULT_MAX_LENGTH, value: "4000"}
+        - {name: STREAMING_TIMEOUT_SECS, value: "900"}
+        - {name: FIRST_CHUNK_TIMEOUT_SECS, value: "180"}
+        volumeMounts:
+        - {name: aura-config, mountPath: /etc/aura, readOnly: true}
       - name: mcp-grafana
         image: grafana/mcp-grafana:latest
         args: ["-t", "streamable-http", "--address", "localhost:8000",
@@ -46,6 +65,8 @@ spec:
       volumes:
       - name: data
         emptyDir: {}
+      - name: aura-config
+        configMap: {name: aura-config}
 ---
 apiVersion: v1
 kind: Service

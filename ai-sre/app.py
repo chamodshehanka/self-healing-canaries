@@ -4,10 +4,13 @@
                         completed -> ledger "passed"
                         aborted   -> ledger "failed" + start an investigation
   POST /investigate     Manually (re)run an investigation for an event (fallback).
+  POST /hitl/policy     AURA's HITL webhook: allow or deny each GitHub write (guardrail 2).
+  /ledger/mcp           The release ledger as an MCP server, for AURA.
   GET  /api/state       Ledger + investigations as JSON.
   GET  /                Live page for the stage: ledger and the agent's steps.
 """
 import asyncio
+import contextlib
 import html
 import json
 import logging
@@ -16,16 +19,55 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
-from agent import DRY_RUN, MODEL, investigate
+from agent import DRY_RUN, GITHUB_REPO, MODEL, investigate
 from ledger import Ledger
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("ai-sre")
 
 ledger = Ledger(os.environ.get("LEDGER_PATH", "/data/ledger.db"))
-app = FastAPI(title="AI SRE")
+
+# ── The release ledger as an MCP server (AURA connects to localhost:8080/ledger/mcp) ──
+ledger_mcp = FastMCP(
+    "release-ledger", stateless_http=True, json_response=True,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
+
+
+@ledger_mcp.tool()
+def get_release_history(limit: int = 20) -> str:
+    """Most recent canary verdicts across ALL environments, newest first.
+    Each row: env, image, git_sha, pod_hash, verdict (passed|failed), source_pr, source_branch."""
+    return json.dumps(ledger.releases(limit), default=str)
+
+
+@ledger_mcp.tool()
+def compare_environments(image: str) -> str:
+    """Every verdict recorded for one image, oldest first. Use it to answer:
+    'did this exact image pass in another environment before failing here?'"""
+    rows = ledger.image_history(image)
+    summary: dict[str, list[str]] = {}
+    for r in rows:
+        summary.setdefault(r["env"], []).append(r["verdict"])
+    return json.dumps({"image": image, "verdicts_by_env": summary, "rows": rows}, default=str)
+
+
+_ledger_app = ledger_mcp.streamable_http_app()
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app):
+    async with ledger_mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(title="AI SRE", lifespan=lifespan)
+app.mount("/ledger", _ledger_app)
 _tasks: set[asyncio.Task] = set()
+_active: set[int] = set()   # investigations in flight, so policy decisions show up on stage
 
 REQUIRED = ("event", "env", "image")
 
@@ -47,6 +89,57 @@ async def rollout_hook(req: Request):
         return start(ev)
 
     return {"ignored": ev["event"]}
+
+
+# ── Guardrail 2: AURA's HITL webhook. Every GitHub write is parked until this answers. ──
+PROTECTED_BRANCHES = {"main", "master"}
+PROTECTED_PATHS = (".github/", "deploy/overlays/prod/", "demo/", "apps/payment/pspsandbox/")
+
+
+def _policy(tool: str, a: dict) -> str | None:
+    """Return a denial reason, or None to allow."""
+    if DRY_RUN:
+        return "dry-run mode: GitHub writes are disabled"
+    repo = f"{a.get('owner', '')}/{a.get('repo', '')}"
+    if a.get("owner") and repo.lower() != GITHUB_REPO.lower():
+        return f"only {GITHUB_REPO} may be changed, not {repo}"
+    branch = a.get("branch") if tool != "create_pull_request" else a.get("head")
+    if tool in ("push_files", "create_or_update_file", "create_branch", "create_pull_request"):
+        if not branch:
+            return "a target branch is required"
+        if branch.split(":")[-1] in PROTECTED_BRANCHES:
+            return f"writes to {branch} are not allowed; push to a PR branch"
+    paths = [f.get("path", "") for f in a.get("files", []) if isinstance(f, dict)]
+    if a.get("path"):
+        paths.append(a["path"])
+    for path in paths:
+        if path.lstrip("/").startswith(PROTECTED_PATHS):
+            return f"{path} is a protected path"
+    return None
+
+
+@app.post("/hitl/policy")
+async def hitl_policy(req: Request):
+    body = await req.json()
+    reasons = []
+    for item in body.get("items", []):
+        tool = item.get("tool_name", "")
+        args = item.get("arguments") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        reason = _policy(tool, args)
+        verdict = "DENY " + reason if reason else "ALLOW"
+        log.info("  🛡  policy %s → %s", tool, verdict)
+        for inv_id in _active:
+            ledger.add_step(inv_id, {"kind": "thought", "text": f"policy: {tool} → {verdict}"})
+        if reason:
+            reasons.append(f"{tool}: {reason}")
+    if reasons:
+        return {"approved": False, "reason": "; ".join(reasons)}
+    return {"approved": True}
 
 
 @app.post("/investigate")
@@ -78,14 +171,17 @@ async def run(inv_id: int, ev: dict):
         elif step["kind"] == "thought":
             log.info("  💭 %s", step["text"][:200].replace("\n", " "))
 
+    _active.add(inv_id)
     try:
-        report = await asyncio.wait_for(investigate(ev, ledger, on_step), timeout=600)
+        report = await asyncio.wait_for(investigate(ev, ledger, on_step), timeout=900)
         ledger.finish_investigation(inv_id, "done", report=report.model_dump())
         log.info("✔ #%d %s → %s", inv_id, report.action, report.pr_url)
         log.info("  ROOT CAUSE: %s", report.root_cause)
     except Exception as e:  # noqa: BLE001 — surface everything on stage
         log.exception("✘ #%d failed", inv_id)
         ledger.finish_investigation(inv_id, "error", error=f"{type(e).__name__}: {e}")
+    finally:
+        _active.discard(inv_id)
 
 
 @app.get("/api/state")
@@ -166,7 +262,7 @@ table{{width:100%;border-collapse:collapse}} td,th{{padding:6px 8px;border-botto
 .report p{{margin:2px 0}} .err{{color:var(--bad)}} a{{color:var(--acc)}}
 @media(max-width:900px){{.grid{{grid-template-columns:1fr}}}}
 </style></head><body>
-<h1>AI SRE</h1><div class=muted>Triggered by Argo Rollouts notifications · model {_e(MODEL)} · {mode}</div>
+<h1>AI SRE</h1><div class=muted>Triggered by Argo Rollouts notifications · AURA on Nebius Token Factory · {_e(MODEL)} · {mode}</div>
 <div class=grid>
 <div class=card><h3>Release ledger</h3><table><tr><th>time</th><th>env</th><th>image</th><th>hash</th><th>PR</th><th>verdict</th></tr>{rel_rows}</table></div>
 <div class=card><h3>Investigations</h3>{''.join(invs) or "<p class=muted>Waiting for an aborted rollout…</p>"}</div>
