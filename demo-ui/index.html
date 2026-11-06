@@ -67,12 +67,12 @@ button.primary { background: var(--acc); color: #04121f; border-color: var(--acc
 .metric .k small { color: var(--mut); margin-left: 4px; }
 .metric .v { font-family: ui-monospace, Menlo, monospace; color: var(--fg); }
 
-svg.chart { width: 100%; height: 130px; display: block; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
-svg.chart.small { height: 70px; }
+svg.chart { width: 100%; height: 120px; display: block; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+svg.chart.small { height: 64px; }
 svg text { fill: var(--mut); font-size: 10px; font-family: ui-monospace, Menlo, monospace; }
 
 /* agent */
-.agent { max-height: 560px; display: flex; flex-direction: column; }
+.agent { height: 100%; max-height: 640px; display: flex; flex-direction: column; }
 .agent .feed { overflow: auto; flex: 1; margin-top: 8px; padding-right: 4px; }
 .ev { display: grid; grid-template-columns: 54px 22px 1fr; gap: 6px; padding: 4px 0; border-bottom: 1px dashed #1e2740; font-size: 12.5px; align-items: start; }
 .ev .ts { color: var(--mut); font: 11px ui-monospace, Menlo, monospace; padding-top: 2px; }
@@ -91,10 +91,11 @@ table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 td, th { text-align: left; padding: 5px 6px; border-bottom: 1px solid #1e2740; white-space: nowrap; }
 th { color: var(--mut); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
 td.wrap { white-space: normal; }
+td.trunc { max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
 a { color: var(--acc); text-decoration: none; }
 .env-staging { color: var(--acc); font-weight: 700; }
 .env-prod { color: var(--warn); font-weight: 700; }
-.console { background: #070a10; border: 1px solid var(--line); border-radius: 8px; padding: 8px; height: 150px; overflow: auto; white-space: pre-wrap; font: 11.5px/1.35 ui-monospace, Menlo, monospace; color: #c9d4e8; }
+.console { background: #070a10; border: 1px solid var(--line); border-radius: 8px; padding: 8px; height: 112px; overflow: auto; white-space: pre-wrap; font: 11.5px/1.35 ui-monospace, Menlo, monospace; color: #c9d4e8; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .tools button { font-size: 12px; padding: 5px 8px; }
 .mut { color: var(--mut); }
@@ -156,7 +157,7 @@ async function run(action) {
 
 /* ── charts ─────────────────────────────────────────────────────────── */
 function chart(series, {roles, threshold, fmt, minMax, small}) {
-  const W = 520, H = small ? 70 : 130, L = 40, R = 8, T = 8, B = 16;
+  const W = 520, H = small ? 64 : 120, L = 40, R = 8, T = 8, B = 16;
   const pts = series.flatMap((s) => s.points);
   if (!pts.length) return `<svg class="chart ${small ? "small" : ""}" viewBox="0 0 ${W} ${H}"><text x="${W/2}" y="${H/2}" text-anchor="middle">no traffic yet</text></svg>`;
   const t0 = Math.min(...pts.map((p) => p[0])), t1 = Math.max(...pts.map((p) => p[0]));
@@ -196,7 +197,7 @@ function envCard(env) {
 
   return `
     <h2><span class="env-${env}">${env.toUpperCase()}</span> <span class="badge ${phase}">${esc(phase)}</span>
-      <span class="mut" style="font-size:12px;font-weight:400;margin-left:auto">step ${ro.step ?? "—"}/${ro.steps ?? "—"} · Argo CD: ${esc(app.revision || "—")} · ${esc(app.sync || "")}</span></h2>
+      <span class="mut" style="font-size:12px;font-weight:400;margin-left:auto">step ${ro.step ?? "—"}/${ro.steps ?? "—"} · Argo CD syncs <code>${esc(app.revision || "—")}</code></span></h2>
     <div class="envmeta">traffic: <b>${esc(ro.traffic?.rps || "?")} req/s</b> · <span class="mono">${esc((ro.traffic?.profile || "").replaceAll(",", " · "))}</span></div>
     ${ro.message ? `<div class="envmeta" style="color:var(--bad)">${esc(ro.message).slice(0, 160)}</div>` : ""}
     <div class="split">
@@ -266,11 +267,12 @@ function render() {
   const f2 = $("feed"); if (f2 && stick) f2.scrollTop = f2.scrollHeight;
 
   $("ledger").innerHTML = SNAP.ledger.length ? `<table><tr><th>time</th><th>env</th><th>image</th><th>hash</th><th>PR</th><th>verdict</th></tr>` +
-    SNAP.ledger.map((r) => `<tr><td>${hhmm(r.ts)}</td><td class="env-${r.env}">${esc(r.env)}</td><td><code>${esc(r.image.split(":").pop())}</code></td><td><code>${esc(r.pod_hash)}</code></td><td>${r.source_pr ? "#" + esc(r.source_pr) : ""}</td><td><span class="badge ${r.verdict}">${esc(r.verdict)}</span></td></tr>`).join("") + `</table>`
+    SNAP.ledger.slice(0, 7).map((r) => `<tr><td>${hhmm(r.ts)}</td><td class="env-${r.env}">${esc(r.env)}</td><td><code>${esc(r.image.split(":").pop())}</code></td><td><code>${esc(r.pod_hash)}</code></td><td>${r.source_pr ? "#" + esc(r.source_pr) : ""}</td><td><span class="badge ${r.verdict}">${esc(r.verdict)}</span></td></tr>`).join("") + `</table>`
     : `<p class="mut">No rollouts recorded yet.</p>`;
 
-  $("prs").innerHTML = SNAP.prs.length ? `<table><tr><th>#</th><th>title</th><th>state</th><th>CI</th></tr>` +
-    SNAP.prs.slice(0, 6).map((p) => `<tr><td><a href="${esc(p.url)}" target="_blank">#${p.number}</a></td><td class="wrap">${esc(p.title).slice(0, 70)}<div class="mut mono">${esc(p.headRefName)}</div></td><td><span class="badge ${p.state}">${esc(p.state)}</span></td><td>${p.ci ? `<span class="badge ${p.ci}">${esc(p.ci)}</span>` : ""}</td></tr>`).join("") + `</table>`
+  const prs = SNAP.prs.filter((p) => !p.headRefName.startsWith("reset/")).slice(0, 5);
+  $("prs").innerHTML = prs.length ? `<table><tr><th>#</th><th>title</th><th>state</th><th>CI</th></tr>` +
+    prs.map((p) => `<tr><td><a href="${esc(p.url)}" target="_blank">#${p.number}</a></td><td class="trunc" title="${esc(p.headRefName)}">${p.headRefName.startsWith("ai-sre/") ? "🤖 " : ""}${esc(p.title)}</td><td><span class="badge ${p.state}">${esc(p.state)}</span></td><td>${p.ci ? `<span class="badge ${p.ci}">${esc(p.ci)}</span>` : ""}</td></tr>`).join("") + `</table>`
     : `<p class="mut">No PRs.</p>`;
 
   $("tools").innerHTML = TOOLS.map(([id, label]) => `<button ${busy ? "disabled" : ""} onclick="run('${id}')">${esc(label)}</button>`).join("");
