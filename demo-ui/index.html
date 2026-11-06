@@ -99,6 +99,7 @@ a { color: var(--acc); text-decoration: none; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .tools button { font-size: 12px; padding: 5px 8px; }
 .mut { color: var(--mut); }
+@media (max-width: 1600px) { .hc { display: none; } }
 @media (max-width: 1100px) { .grid, .bottom, .story { grid-template-columns: 1fr; } .steps { grid-template-columns: repeat(5, 1fr); } .part { grid-column: span 5; } }
 </style>
 </head>
@@ -266,8 +267,8 @@ function render() {
   $("agent").innerHTML = agentCard();
   const f2 = $("feed"); if (f2 && stick) f2.scrollTop = f2.scrollHeight;
 
-  $("ledger").innerHTML = SNAP.ledger.length ? `<table><tr><th>time</th><th>env</th><th>image</th><th>hash</th><th>PR</th><th>verdict</th></tr>` +
-    SNAP.ledger.slice(0, 7).map((r) => `<tr><td>${hhmm(r.ts)}</td><td class="env-${r.env}">${esc(r.env)}</td><td><code>${esc(r.image.split(":").pop())}</code></td><td><code>${esc(r.pod_hash)}</code></td><td>${r.source_pr ? "#" + esc(r.source_pr) : ""}</td><td><span class="badge ${r.verdict}">${esc(r.verdict)}</span></td></tr>`).join("") + `</table>`
+  $("ledger").innerHTML = SNAP.ledger.length ? `<table><tr><th>time</th><th>env</th><th>image</th><th class="hc">hash</th><th>PR</th><th>verdict</th></tr>` +
+    SNAP.ledger.slice(0, 7).map((r) => `<tr><td>${hhmm(r.ts)}</td><td class="env-${r.env}">${esc(r.env)}</td><td><code>${esc(r.image.split(":").pop())}</code></td><td class="hc"><code>${esc(r.pod_hash)}</code></td><td>${r.source_pr ? "#" + esc(r.source_pr) : ""}</td><td><span class="badge ${r.verdict}">${esc(r.verdict)}</span></td></tr>`).join("") + `</table>`
     : `<p class="mut">No rollouts recorded yet.</p>`;
 
   const prs = SNAP.prs.filter((p) => !p.headRefName.startsWith("reset/")).slice(0, 5);
