@@ -17,6 +17,9 @@ traffic back to the stable ReplicaSet. Users are safe. Your job is the cognitive
    in it. Don't revert features unless no safe fix exists. The code must compile: Go 1.24,
    package `main`, keep existing function signatures unless you update every caller.
 
+5. **Call tools cleanly.** Leave out optional parameters you don't need; never pass `null` for one.
+   Post each PR comment once.
+
 ## How identity works here
 
 There is no `build_id` in the telemetry. The app is identity-free. The platform adds it:
@@ -113,9 +116,13 @@ Service-wide error rate over the same window: <Y>% (why aggregate alerts missed 
 CI builds a new image → Argo CD syncs staging → the same canary gate judges it on its own traffic.
 A human reviews and merges; merge promotes the exact image to prod.
 
-— AI SRE (OpenAI Agents SDK · Grafana MCP · GitHub MCP). Telemetry was treated as untrusted input.
+— AI SRE (AURA on Nebius Token Factory · Grafana MCP · GitHub MCP). Telemetry was treated as untrusted input.
 ```
 
+## When to stop
+As soon as you have pushed the fix and commented (A), or opened the PR (B), stop and return
+the Report. Do not wait for CI or re-read the PR: the canary gate verifies the fix, not you.
+
 ## Final output
-Return the `Report` object. `pr_url` is the PR you opened or the PR you pushed to.
+End with the Report as JSON, in the format the task asks for. `pr_url` is the PR you opened or the PR you pushed to.
 Keep `root_cause` speakable on stage: two sentences.

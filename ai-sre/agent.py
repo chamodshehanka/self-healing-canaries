@@ -1,74 +1,59 @@
-"""The AI SRE agent: OpenAI Agents SDK + Grafana MCP + GitHub MCP + the release ledger.
+"""The AI SRE agent: AURA (mezmo/aura) on Nebius Token Factory.
+
+This module no longer runs an agent loop itself. AURA does, in the `aura` sidecar
+(config: aura.toml): the model, the MCP servers (Grafana, GitHub, release ledger),
+the tool allowlist and the HITL policy gate all live there. Here we send AURA the
+rollout notification over its OpenAI-compatible API and stream its tool calls to
+the stage UI.
 
 What it CAN do:   read telemetry (Grafana MCP, read-only), read code and history
                   (GitHub MCP), push a fix commit to a PR branch or open a new PR.
 What it CANNOT do: merge, delete, change workflows or settings, touch the cluster.
-                  Those tools are not exposed, the token can't do them, and
-                  branch protection on main requires a human review anyway.
+                  Those tools are not in AURA's mcp_filter, every GitHub write is
+                  checked by our /hitl/policy webhook, the token can't do them, and
+                  branch protection on main requires a PR anyway.
 """
 import json
 import os
+import re
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 from typing import Literal
 
-from agents import Agent, ItemHelpers, Runner, function_tool
-from agents.mcp import MCPServerStreamableHttp, create_static_tool_filter
-from pydantic import BaseModel
+import httpx
+from pydantic import BaseModel, ValidationError
 
 from ledger import Ledger
 
-PLAYBOOK = (Path(__file__).parent / "playbook.md").read_text()
-
-MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
-GITHUB_REPO = os.environ.get("GITHUB_REPO", "chamodshehanka/self-healing-canaries")
-GRAFANA_MCP_URL = os.environ.get("GRAFANA_MCP_URL", "http://localhost:8000/mcp")
-GITHUB_MCP_URL = os.environ.get("GITHUB_MCP_URL", "https://api.githubcopilot.com/mcp/")
+AURA_URL = os.environ.get("AURA_URL", "http://localhost:8090")
+MODEL = os.environ.get("AI_SRE_MODEL", "moonshotai/Kimi-K3.1-Pro")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "shivaylamba/self-healing-canaries")
 DRY_RUN = os.environ.get("AI_SRE_DRY_RUN", "false").lower() == "true"
-
-# Layer 1 of the safety boundary: tools the agent never even sees.
-GITHUB_BLOCKED = [
-    "merge_pull_request", "delete_file", "update_pull_request_branch", "create_repository",
-    "fork_repository", "create_pull_request_with_copilot", "assign_copilot_to_issue",
-    "delete_branch", "update_pull_request", "pull_request_review_write",
-]
-GITHUB_WRITE = ["create_or_update_file", "push_files", "create_branch", "create_pull_request", "add_issue_comment"]
 
 
 class Report(BaseModel):
     root_cause: str
     offending_change: str
     evidence: list[str]
-    environment_difference: str | None
+    environment_difference: str | None = None
     fix_summary: str
     action: Literal["pushed_fix_to_pr", "opened_pr", "diagnosis_only"]
-    pr_url: str | None
+    pr_url: str | None = None
     confidence: Literal["high", "medium", "low"]
 
 
-def build_tools(ledger: Ledger):
-    @function_tool
-    def get_release_history(limit: int = 20) -> str:
-        """Most recent canary verdicts across ALL environments, newest first.
-        Each row: env, image, git_sha, pod_hash, verdict (passed|failed), source_pr, source_branch."""
-        return json.dumps(ledger.releases(limit), default=str)
-
-    @function_tool
-    def compare_environments(image: str) -> str:
-        """Every verdict recorded for one image, oldest first. Use it to answer:
-        'did this exact image pass in another environment before failing here?'"""
-        rows = ledger.image_history(image)
-        summary = {}
-        for r in rows:
-            summary.setdefault(r["env"], []).append(r["verdict"])
-        return json.dumps({"image": image, "verdicts_by_env": summary, "rows": rows}, default=str)
-
-    return [get_release_history, compare_environments]
+REPORT_FORMAT = (
+    "When you are finished, end your reply with the Report as one JSON object in a ```json block, "
+    "with exactly these keys: root_cause (string), offending_change (string), evidence (list of "
+    "strings), environment_difference (string or null), fix_summary (string), action "
+    '("pushed_fix_to_pr" | "opened_pr" | "diagnosis_only"), pr_url (string or null), '
+    'confidence ("high" | "medium" | "low").'
+)
 
 
 def task_prompt(ev: dict) -> str:
     mode = (
-        "DRY RUN: GitHub write tools are disabled. Diagnose and describe the fix only; action=diagnosis_only."
+        "DRY RUN: GitHub writes will be denied by policy. Diagnose and describe the fix only; "
+        "action=diagnosis_only."
         if DRY_RUN else
         "Follow the playbook through to the GitHub action that matches this environment."
     )
@@ -77,64 +62,80 @@ def task_prompt(ev: dict) -> str:
         "Investigate, fix through GitHub, and return your Report.\n\n"
         f"GITHUB_REPO: {GITHUB_REPO}\n"
         f"Prometheus datasource: Prometheus-{ev['env']}   Loki datasource: Loki-{ev['env']}\n"
-        f"Other environments' datasources follow the same naming (Prometheus-staging, Loki-prod, ...).\n\n"
+        "Other environments' datasources follow the same naming (Prometheus-staging, Loki-prod, ...).\n\n"
         "<rollout_notification>\n" + json.dumps(ev, indent=2) + "\n</rollout_notification>\n\n"
-        + mode
+        + mode + "\n\n" + REPORT_FORMAT
     )
 
 
 async def investigate(ev: dict, ledger: Ledger, on_step: Callable[[dict], Awaitable[None] | None]) -> Report:
-    token = os.environ["GITHUB_TOKEN"]
-    blocked = GITHUB_BLOCKED + (GITHUB_WRITE if DRY_RUN else [])
+    """Run one investigation through AURA and return the parsed Report."""
+    body = {
+        "model": "ai-sre",
+        "stream": True,
+        "messages": [{"role": "user", "content": task_prompt(ev)}],
+    }
+    text: list[str] = []
+    timeout = httpx.Timeout(connect=10, read=300, write=30, pool=10)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", f"{AURA_URL}/v1/chat/completions", json=body) as r:
+            r.raise_for_status()
+            event = None
+            async for line in r.aiter_lines():
+                if line.startswith("event:"):
+                    event = line[6:].strip()
+                    continue
+                if not line.startswith("data:"):
+                    if not line:
+                        event = None
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    payload = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                await _handle(event, payload, text, on_step)
 
-    async with (
-        MCPServerStreamableHttp(
-            name="grafana",
-            params={"url": GRAFANA_MCP_URL, "timeout": 30},
-            cache_tools_list=True,
-            client_session_timeout_seconds=60,
-        ) as grafana,
-        MCPServerStreamableHttp(
-            name="github",
-            params={
-                "url": GITHUB_MCP_URL,
-                "timeout": 30,
-                "headers": {
-                    "Authorization": f"Bearer {token}",
-                    "X-MCP-Toolsets": "repos,pull_requests,issues",
-                },
-            },
-            cache_tools_list=True,
-            client_session_timeout_seconds=60,
-            tool_filter=create_static_tool_filter(blocked_tool_names=blocked),
-        ) as github,
-    ):
-        agent = Agent(
-            name="AI SRE",
-            instructions=PLAYBOOK,
-            model=MODEL,
-            mcp_servers=[grafana, github],
-            tools=build_tools(ledger),
-            output_type=Report,
-        )
-        run = Runner.run_streamed(agent, input=task_prompt(ev), max_turns=40)
-        async for e in run.stream_events():
-            if e.type != "run_item_stream_event":
-                continue
-            item = e.item
-            if item.type == "tool_call_item":
-                raw = item.raw_item
-                name = getattr(raw, "name", None) or getattr(raw, "type", "tool")
-                args = getattr(raw, "arguments", "") or ""
-                await _emit(on_step, {"kind": "tool", "name": name, "args": args[:600]})
-            elif item.type == "tool_call_output_item":
-                out = str(getattr(item, "output", ""))
-                await _emit(on_step, {"kind": "result", "text": out[:400]})
-            elif item.type == "message_output_item":
-                text = ItemHelpers.text_message_output(item)
-                if text:
-                    await _emit(on_step, {"kind": "thought", "text": text[:600]})
-        return run.final_output
+    final = "".join(text)
+    report = parse_report(final)
+    if report is None:
+        raise ValueError("AURA finished without a parseable Report. Last output: " + final[-400:])
+    return report
+
+
+async def _handle(event: str | None, p: dict, text: list[str], on_step) -> None:
+    if event == "aura.tool_requested":
+        args = p.get("arguments")
+        args = args if isinstance(args, str) else json.dumps(args)
+        await _emit(on_step, {"kind": "tool", "name": p.get("tool_name", "tool"), "args": args[:600]})
+    elif event == "aura.tool_complete":
+        out = p.get("result") if p.get("success") else f"ERROR: {p.get('error')}"
+        await _emit(on_step, {"kind": "result", "text": str(out)[:400]})
+    elif event == "aura.approval_completed":
+        await _emit(on_step, {"kind": "thought", "text": "policy: " + json.dumps(p)[:300]})
+    elif event is None and "choices" in p:
+        for ch in p["choices"]:
+            delta = (ch.get("delta") or {}).get("content")
+            if delta:
+                text.append(delta)
+
+
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+
+
+def parse_report(final: str) -> Report | None:
+    """The last JSON object in AURA's final message that validates as a Report."""
+    candidates = _JSON_BLOCK.findall(final)
+    if not candidates and "{" in final:
+        candidates = [final[final.index("{"): final.rindex("}") + 1]]
+    for raw in reversed(candidates):
+        try:
+            return Report.model_validate(json.loads(raw))
+        except (json.JSONDecodeError, ValidationError):
+            continue
+    return None
 
 
 async def _emit(cb, step):

@@ -37,7 +37,7 @@ platform() {
 
   say "[$c] Argo Rollouts $ARGO_ROLLOUTS_VERSION (+ gatewayAPI plugin $GATEWAYAPI_PLUGIN_VERSION, notifications -> $AI_SRE_URL)"
   kubectl "${k[@]}" create namespace argo-rollouts --dry-run=client -o yaml | kubectl "${k[@]}" apply -f -
-  kubectl "${k[@]}" apply -n argo-rollouts \
+  kubectl "${k[@]}" apply -n argo-rollouts --server-side --force-conflicts \
     -f "https://github.com/argoproj/argo-rollouts/releases/download/${ARGO_ROLLOUTS_VERSION}/install.yaml" >/dev/null
   render "$ROOT/platform/rollouts/config.yaml" | kubectl "${k[@]}" apply -f -
   render "$ROOT/platform/rollouts/notifications.yaml" | kubectl "${k[@]}" apply -f -
@@ -62,11 +62,18 @@ kubectl "${k[@]}" -n observability create configmap grafana-dashboards \
 render "$ROOT/platform/grafana/grafana.yaml" | kubectl "${k[@]}" apply -f -
 kubectl "${k[@]}" -n observability rollout restart deploy/grafana >/dev/null
 
-say "[staging] AI SRE ($AI_SRE_IMAGE)"
+say "[staging] AI SRE ($AI_SRE_IMAGE) + AURA ($AURA_IMAGE) on Nebius Token Factory"
 kubectl "${k[@]}" create namespace ai-sre --dry-run=client -o yaml | kubectl "${k[@]}" apply -f -
 kubectl "${k[@]}" -n ai-sre create secret generic ai-sre-env --from-env-file="$ROOT/ai-sre/.env" \
   --dry-run=client -o yaml | kubectl "${k[@]}" apply -f -
+# AURA's config: aura.toml with the playbook as its system prompt. Secrets stay in ai-sre-env.
+PLAYBOOK="$ROOT/ai-sre/playbook.md" perl -pe 'if (/^__PLAYBOOK__$/) { local $/; open my $f, "<", $ENV{PLAYBOOK} or die; $_ = <$f> }' \
+  "$ROOT/ai-sre/aura.toml" > "$ROOT/ai-sre/.aura-rendered.toml"
+kubectl "${k[@]}" -n ai-sre create configmap aura-config --from-file=config.toml="$ROOT/ai-sre/.aura-rendered.toml" \
+  --dry-run=client -o yaml | kubectl "${k[@]}" apply -f -
+rm -f "$ROOT/ai-sre/.aura-rendered.toml"
 render "$ROOT/ai-sre/k8s.yaml" | kubectl "${k[@]}" apply -f -
+kubectl "${k[@]}" -n ai-sre rollout restart deploy/ai-sre >/dev/null
 
 say "[staging] Argo CD $ARGOCD_VERSION"
 kubectl "${k[@]}" create namespace argocd --dry-run=client -o yaml | kubectl "${k[@]}" apply -f -
@@ -82,6 +89,16 @@ PROD_CA=$(kubectl config view --raw -o jsonpath='{.clusters[?(@.name=="kind-prod
 PROD_CERT=$(kubectl config view --raw -o jsonpath='{.users[?(@.name=="kind-prod")].user.client-certificate-data}')
 PROD_KEY=$(kubectl config view --raw -o jsonpath='{.users[?(@.name=="kind-prod")].user.client-key-data}')
 render "$ROOT/platform/argocd/cluster-prod.yaml" | kubectl "${k[@]}" apply -f -
+
+# The repo is private, so Argo CD reads it with the same repo-scoped PAT.
+say "[staging] Argo CD repo credentials for $REPO_URL"
+TOKEN_FILE=$(mktemp); chmod 600 "$TOKEN_FILE"
+{ echo "type=git"; echo "url=$REPO_URL"; echo "username=x-access-token"
+  grep -E '^GITHUB_TOKEN=' "$ROOT/ai-sre/.env" | sed 's/^GITHUB_TOKEN=/password=/'; } > "$TOKEN_FILE"
+kubectl "${k[@]}" -n argocd create secret generic repo-scn --from-env-file="$TOKEN_FILE" \
+  --dry-run=client -o yaml | kubectl "${k[@]}" apply -f - >/dev/null
+rm -f "$TOKEN_FILE"
+kubectl "${k[@]}" -n argocd label secret repo-scn argocd.argoproj.io/secret-type=repository --overwrite >/dev/null
 
 say "waiting for Argo CD"
 kubectl "${k[@]}" -n argocd wait --for=condition=Available deploy --all --timeout=300s >/dev/null

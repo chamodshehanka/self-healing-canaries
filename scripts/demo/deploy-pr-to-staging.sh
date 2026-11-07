@@ -15,4 +15,4 @@ kubectl "${KSTG[@]}" -n argocd patch application payment-staging --type merge \
   -p "{\"spec\":{\"source\":{\"targetRevision\":\"$BR\"}}}" >/dev/null
 kubectl "${KSTG[@]}" -n argocd annotate application payment-staging argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 ok "Argo CD syncing"
-exec "$(dirname "$0")/watch.sh" staging
+[[ "${NO_WATCH:-0}" == 1 ]] || exec "$(dirname "$0")/watch.sh" staging

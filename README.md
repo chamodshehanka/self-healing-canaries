@@ -39,7 +39,7 @@ This talk follows up KubeCon India's *"From Flaky Builds to Self-Healing Deploym
 apps/           Go services (payment, inventory, loadgen). Plain OTel SDK, no build identity
 deploy/         kustomize base + staging/prod overlays (what Argo CD syncs)
 platform/       kind configs, Gateway API, Rollouts plugin + notifications, OTel/Prom/Loki/Jaeger, Grafana, Argo CD
-ai-sre/         FastAPI webhook + OpenAI Agents SDK agent + release ledger + playbook
+ai-sre/         FastAPI webhook + release ledger (MCP) + HITL policy; AURA agent config (aura.toml) + playbook
 .github/        pr-image.yml (build once, promote via overlays), release.yml (bootstrap images), ci.yml
 scripts/        up.sh, down.sh, build-local.sh, protect-main.sh, demo/*
 demo/           PR #1 contents (the two latent bugs) + known-good fallback fixes
@@ -51,7 +51,7 @@ docs/           DEMO-RUNBOOK.md
 
 ```bash
 # prerequisites: docker, kind, kubectl, helm, gh, kubectl-argo-rollouts, perl
-cp ai-sre/.env.example ai-sre/.env      # OpenAI key + fine-grained GitHub PAT (this repo only)
+cp ai-sre/.env.example ai-sre/.env      # Nebius Token Factory key + fine-grained GitHub PAT (this repo only)
 # GitHub: Actions → release → Run (v1.0.0), then make the scn-* packages public
 scripts/protect-main.sh
 scripts/up.sh
@@ -69,12 +69,21 @@ Slides: `cd slides && npm install && npm run dev`. For the Sched PDF, run `npm r
 - [`deploy/base/rollout.yaml`](deploy/base/rollout.yaml): `podTemplateHashValue`, Gateway API traffic routing, notifications
 - [`ai-sre/playbook.md`](ai-sre/playbook.md): what the agent does, and what it must never do
 
+## The AI SRE: AURA on Nebius Token Factory
+
+The agent loop runs in [AURA](https://github.com/mezmo/aura), configured in [`ai-sre/aura.toml`](ai-sre/aura.toml):
+the model (Kimi K3.1 Pro on Nebius Token Factory, via its OpenAI-compatible API), three MCP servers
+(Grafana, GitHub, and the release ledger), a tool allowlist, and a HITL policy gate on every GitHub write.
+The `ai-sre` container receives the Rollouts notification, hands it to AURA, and streams AURA's tool calls to the stage UI.
+Change the model with `AI_SRE_MODEL` in `ai-sre/.env`.
+
 ## Safety model for the agent
 
-1. **Tool filter**: merge, delete and branch-update tools are never exposed. Grafana MCP runs with `--disable-write`.
-2. **Token scope**: fine-grained PAT, one repo, contents + pull requests.
-3. **Branch protection**: nothing lands on `main` without a PR.
-4. **Same gate**: the agent's fix is judged by the same canary analysis as a human's.
-5. **Human merge**: the merge is the promotion.
+1. **Tool filter**: AURA's `mcp_filter` exposes only read tools plus five GitHub writes. Merge, delete and branch-update tools are never exposed. Grafana MCP runs with `--disable-write`.
+2. **Policy gate**: each of those writes is parked by AURA's `[hitl]` until `/hitl/policy` answers. It denies writes to `main`, to `.github/`, `deploy/overlays/prod/`, `demo/` and the PSP sandbox, and to any other repo.
+3. **Token scope**: fine-grained PAT, one repo, contents + pull requests.
+4. **Branch protection**: nothing lands on `main` without a PR.
+5. **Same gate**: the agent's fix is judged by the same canary analysis as a human's.
+6. **Human merge**: the merge is the promotion.
 
 The agent has no Kubernetes credentials. Telemetry is treated as untrusted input.

@@ -7,7 +7,7 @@ Demo time is about 12 minutes, split into two parts. Each beat lists the command
 | Tab | URL / command |
 |---|---|
 | Terminal A (driver) | `scripts/demo/*` |
-| Terminal B (agent) | `kubectl --context kind-staging -n ai-sre logs -f deploy/ai-sre -c ai-sre` |
+| Terminal B (agent) | `kubectl --context kind-staging -n ai-sre logs -f deploy/ai-sre -c ai-sre` (AURA itself: `-c aura`) |
 | Rollouts UI, staging | `kubectl argo rollouts dashboard --context kind-staging` → http://localhost:3100 |
 | Rollouts UI, prod | `kubectl argo rollouts dashboard --context kind-prod -p 3101` → http://localhost:3101 |
 | Grafana | http://localhost:3000 → *Self-Healing Canaries* dashboard |
@@ -24,7 +24,7 @@ Demo time is about 12 minutes, split into two parts. Each beat lists the command
 2. **Actions → release → Run workflow** (tag `v1.0.0`). This builds payment, inventory, loadgen and ai-sre for
    amd64 and arm64.
 3. Set the 4 GHCR packages (`scn-*`) to **public**, so the kind clusters can pull without a secret.
-4. Run `cp ai-sre/.env.example ai-sre/.env` and fill in `OPENAI_API_KEY` and a **fine-grained PAT**. The PAT should cover only this repo, with
+4. Run `cp ai-sre/.env.example ai-sre/.env` and fill in `NEBIUS_API_KEY` (Token Factory) and a **fine-grained PAT**. The PAT should cover only this repo, with
    Contents and Pull requests set to read/write.
 5. Run `scripts/protect-main.sh`. After this, a PR is required to change main.
 6. Run `scripts/up.sh`, which creates the two kind clusters and everything on them.

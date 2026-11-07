@@ -78,7 +78,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "expr": "(sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) or 0 * sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))) / sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
           "legendFormat": "hash {{rollouts_pod_template_hash}}",
           "datasource": {
             "type": "prometheus",
@@ -140,7 +140,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum(rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "expr": "(sum(rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) or vector(0)) / sum(rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
           "legendFormat": "payment (all pods)",
           "datasource": {
             "type": "prometheus",
@@ -337,7 +337,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "expr": "(sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) or 0 * sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))) / sum by (rollouts_pod_template_hash) (rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
           "legendFormat": "hash {{rollouts_pod_template_hash}}",
           "datasource": {
             "type": "prometheus",
@@ -399,7 +399,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) / sum(rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
+          "expr": "(sum(rate(http_server_duration_milliseconds_count{app=\"payment\",http_status_code=~\"5..\"}[1m])) or vector(0)) / sum(rate(http_server_duration_milliseconds_count{app=\"payment\"}[1m]))",
           "legendFormat": "payment (all pods)",
           "datasource": {
             "type": "prometheus",

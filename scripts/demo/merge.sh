@@ -16,4 +16,4 @@ for app in payment-staging payment-prod; do
   kubectl "${KSTG[@]}" -n argocd annotate application "$app" argocd.argoproj.io/refresh=hard --overwrite >/dev/null
 done
 ok "merged; prod syncing from main"
-exec "$(dirname "$0")/watch.sh" prod
+[[ "${NO_WATCH:-0}" == 1 ]] || exec "$(dirname "$0")/watch.sh" prod

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Night before: tag the baseline and open demo PR #1 so its image is already built.
-# On stage, deploying PR #1 to staging is then instant (no CI wait).
+# Night before: tag the baseline and open the demo feature PR so its image is already built.
+# On stage, deploying it to staging is then instant (no CI wait).
 source "$(dirname "$0")/../lib.sh"
 need gh git
 cd "$ROOT"
@@ -15,7 +15,7 @@ if git ls-remote --exit-code --heads origin "$PR1_BRANCH" >/dev/null; then
   die "branch $PR1_BRANCH already exists — run scripts/demo/reset.sh first"
 fi
 
-say "creating PR #1 on $PR1_BRANCH"
+say "creating the feature PR on $PR1_BRANCH"
 git switch -q -c "$PR1_BRANCH" origin/main
 cp -R demo/pr1/apps/. apps/
 git add apps
@@ -23,7 +23,7 @@ git commit -q -m "feat(payment): migrate to inventory v2 API and PSP v2 (minor u
 git push -q -u origin "$PR1_BRANCH"
 git switch -q main
 
-gh pr create -R "$GITHUB_REPO" --base main --head "$PR1_BRANCH" \
+PR_URL=$(gh pr create -R "$GITHUB_REPO" --base main --head "$PR1_BRANCH" \
   --title "feat(payment): migrate to inventory v2 + PSP v2" --body "$(cat <<'MD'
 Inventory v1 and PSP v1 are deprecated next quarter.
 
@@ -32,10 +32,14 @@ Inventory v1 and PSP v1 are deprecated next quarter.
 
 ✅ unit tests pass · ✅ builds · ✅ liveness/readiness unchanged
 MD
-)"
+)")
+PR_NUM=${PR_URL##*/}
+ok "opened PR #$PR_NUM: $PR_URL"
 
 say "waiting for pr-image to build the image and bump the overlays"
 sleep 10
 RUN=$(gh run list -R "$GITHUB_REPO" --branch "$PR1_BRANCH" --workflow pr-image.yml -L 1 --json databaseId --jq '.[0].databaseId')
-gh run watch -R "$GITHUB_REPO" "$RUN" --exit-status
-ok "PR #1 ready. On stage: scripts/demo/deploy-pr-to-staging.sh"
+# Quiet watch: the full step log and GitHub's checks:read 403 notice are noise here.
+gh run watch -R "$GITHUB_REPO" "$RUN" --exit-status --interval 10 >/dev/null 2>&1 \
+  || die "pr-image failed for PR #$PR_NUM: gh run view -R $GITHUB_REPO $RUN --log-failed"
+ok "PR #$PR_NUM ready, image built. On stage: scripts/demo/deploy-pr-to-staging.sh"
